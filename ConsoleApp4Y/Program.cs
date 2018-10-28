@@ -1,316 +1,207 @@
 ﻿using System;
-using System.Data.SQLite;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.Configuration;
+using System.Data;
 using System.IO;
+using System.Threading.Tasks;
+using ConsoleApp4Y.Models;
 
 namespace ConsoleApp4Y
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
+            const int LIST_CAPACITY = 1000;
+
             try
             {
-                using (StreamReader file = new StreamReader(args[0]))
+                var connectionString = ConfigurationManager.ConnectionStrings["Sqlite"].ConnectionString;
+
+                IRepository repository = new Repository(connectionString);
+
+                await repository.InitAsync();
+
+                var orders = new List<Order> { Capacity = LIST_CAPACITY };
+
+                using (var reader = new StreamReader(args[0]))
                 {
-                    using (SQLiteConnection conn = new SQLiteConnection("Data Source=database.db;Version=3;"))
+                    string line;
+                    string[] columnNames = null;
+
+                    var lineNumber = 1;
+
+                    while ((line = reader.ReadLine()) != null)
                     {
-                        conn.Open();
+                        var values = line.Split('\t');
 
-                        using (SQLiteCommand cmd = new SQLiteCommand(conn))
+                        if (lineNumber == 1)
                         {
-                            bool isParsed;
-                            float valFloat;
-                            int i = 0, valInt;
-                            string line;
+                            columnNames = (string[])values.Clone();
+                        }
+                        else
+                        {
+                            var order = new Order();
 
-                            string[] colNames = null, values;
-
-                            DateTime dateTime;
-
-                            cmd.CommandText =
-                                "DROP TABLE IF EXISTS `product`; " +
-                                "CREATE TABLE `product` (" +
-                                    "`id` INTEGER, " +
-                                    "`name` TEXT" +
-                                "); " +
-                                "INSERT INTO `product` VALUES " +
-                                    "(1, 'A'), " +
-                                    "(2, 'B'), " +
-                                    "(3, 'C'), " +
-                                    "(4, 'D'), " +
-                                    "(5, 'E'), " +
-                                    "(6, 'F'), " +
-                                    "(7, 'G');";
-
-                            cmd.ExecuteNonQuery();
-
-                            cmd.CommandText =
-                                "DROP TABLE IF EXISTS `оrder`; " +
-                                "CREATE TABLE `оrder` (" +
-                                    "`id` INTEGER, " +
-                                    "`dt` INTEGER, " +
-                                    "`product_id` INTEGER, " +
-                                    "`amount` REAL" +
-                                ");";
-
-                            cmd.ExecuteNonQuery();
-
-                            while ((line = file.ReadLine()) != null)
+                            for (var i = 0; i < columnNames.Length; i++)
                             {
-                                values = line.Split(new char[] { '\t' });
+                                if (i == values.Length) break;
 
-                                if (i == 0)
+                                switch (columnNames[i])
                                 {
-                                    colNames = (string[])values.Clone();
-
-                                    for (int j = 0; j < colNames.Length; j++)
-                                        if (colNames[j] == "dt")
-                                            values[j] = "strftime('%s', ?)";
-                                        else
-                                            values[j] = "?";
-
-                                    cmd.CommandText = string.Format("INSERT INTO `оrder` ({0}) VALUES ({1});", string.Join(", ", colNames), string.Join(", ", values));
-
-                                    cmd.Prepare();
-                                }
-                                else
-                                {
-                                    if (values.Length == colNames.Length)
-                                    {
-                                        isParsed = false;
-
-                                        for (int j = 0; j < colNames.Length; j++)
+                                    case "dt":
+                                        if (DateTime.TryParse(values[i], out var dateTime))
                                         {
-                                            switch (colNames[j])
-                                            {
-                                                case "id":
-                                                case "product_id":
-                                                    isParsed = int.TryParse(values[j], out valInt) && (valInt > 0);
-
-                                                    if (isParsed)
-                                                        cmd.Parameters.AddWithValue(null, valInt);
-
-                                                    break;
-                                                case "dt":
-                                                    isParsed = DateTime.TryParse(values[j], out dateTime);
-
-                                                    if (isParsed)
-                                                        cmd.Parameters.AddWithValue(null, dateTime.ToString("s"));
-
-                                                    break;
-                                                case "amount":
-                                                    isParsed = float.TryParse(values[j], out valFloat);
-
-                                                    if (isParsed)
-                                                        cmd.Parameters.AddWithValue(null, valFloat);
-
-                                                    break;
-                                            }
-
-                                            if (!isParsed)
-                                            {
-                                                Console.WriteLine(string.Format("Ошибка в строке {0}: тип значения '{1}' не соответствует типу значений для столбца '{2}'.", i.ToString(), values[j], colNames[j]));
-
-                                                break;
-                                            }
+                                            order.Dt = dateTime;
                                         }
 
-                                        if (isParsed)
-                                            cmd.ExecuteNonQuery();
+                                        break;
+                                    case "product_id":
+                                        if (int.TryParse(values[i], out var productId))
+                                        {
+                                            order.ProductId = productId;
+                                        }
 
-                                        cmd.Parameters.Clear();
-                                    }
-                                    else
-                                        Console.WriteLine(string.Format("Ошибка в строке {0}: количество значений не совпадает с количеством столбцов таблицы.", i.ToString()));
+                                        break;
+                                    case "amount":
+                                        if (float.TryParse(values[i], out var amount))
+                                        {
+                                            order.Amount = amount;
+                                        }
+
+                                        break;
                                 }
-
-                                i++;
                             }
 
-                            /* cmd.CommandText =
-                                "SELECT " +
-                                    "datetime(`оrder`.`dt`, 'unixepoch') AS `dt`, " +
-                                    "`оrder`.`amount` AS `amount`, " +
-                                    "`product`.`name` AS `product` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` " +
-                                "ORDER BY " +
-                                    "`dt`;";
+                            var context = new ValidationContext(order);
+                            var results = new List<ValidationResult>();
 
-                            using (SQLiteDataReader reader = cmd.ExecuteReader())
+                            if (Validator.TryValidateObject(order, context, results, validateAllProperties: false))
                             {
-                                while (reader.Read())
-                                    Console.WriteLine(string.Format("{0}\t{1}\t{2}", reader["dt"], reader["amount"], reader["product"]));
+                                orders.Add(order);
+
+                                if (orders.Count % LIST_CAPACITY == 0)
+                                {
+                                    await repository.AddOrdersAsync(orders);
+
+                                    orders.Clear();
+                                }
                             }
-
-                            Console.WriteLine(); */
-
-                            // ----
-
-                            Console.WriteLine(string.Format("1. Количество и сумма заказов по каждому продукту за текущий месяц ({0}).", DateTime.Now.Month));
-
-                            cmd.CommandText =
-                                "SELECT " +
-                                    "`product`.`name` AS `product`, " +
-                                    "count(`оrder`.`id`) AS `amount`, " +
-                                    "total(`оrder`.`amount`) AS `sum` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` AND " +
-                                    "strftime('%m', `оrder`.`dt`, 'unixepoch') = strftime('%m', date('now')) " +
-                                "GROUP BY " +
-                                    "`product` " +
-                                "ORDER BY " +
-                                    "`product`;";
-
-                            Console.WriteLine("Продукт\tКоличество заказов\tСумма заказов");
-
-                            using (SQLiteDataReader reader = cmd.ExecuteReader())
+                            else
                             {
-                                while (reader.Read())
-                                    Console.WriteLine(string.Format("{0}\t{1}\t{2}", reader["product"], reader["amount"], reader["sum"]));
-                            }
+                                Console.WriteLine($"Ошибки в строке {lineNumber}:");
 
-                            Console.WriteLine();
-
-                            // ----
-
-                            Console.WriteLine(string.Format("2а. Продукты, которые были заказаны в текущем месяце ({0}), но не в прошлом ({1}).", DateTime.Now.Month, DateTime.Now.AddMonths(-1).Month));
-
-                            cmd.CommandText =
-                                "SELECT " +
-                                    "`product`.`name` AS `product` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` AND " +
-                                    "strftime('%m', `оrder`.`dt`, 'unixepoch') = strftime('%m', date('now')) " +
-                                "GROUP BY " +
-                                    "`product` " +
-                                "EXCEPT " +
-                                "SELECT " +
-                                    "`product`.`name` AS `product` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` AND " +
-                                    "strftime('%m', `оrder`.`dt`, 'unixepoch') = strftime('%m', date('now'), '-1 month') " +
-                                "GROUP BY " +
-                                    "`product` " +
-                                "ORDER BY " +
-                                    "`product`;";
-
-                            using (SQLiteDataReader reader = cmd.ExecuteReader())
-                            {
-                                while (reader.Read())
-                                    Console.WriteLine(reader["product"]);
-                            }
-
-                            Console.WriteLine();
-
-                            // ----
-
-                            Console.WriteLine(string.Format("2б. Продукты, которые были заказаны в прошлом месяце ({0}), но не в текущем ({1}).", DateTime.Now.AddMonths(-1).Month, DateTime.Now.Month));
-
-                            cmd.CommandText =
-                                "SELECT " +
-                                    "`product`.`name` AS `product` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` AND " +
-                                    "strftime('%m', `оrder`.`dt`, 'unixepoch') = strftime('%m', date('now'), '-1 month') " +
-                                "GROUP BY " +
-                                    "`product` " +
-                                "EXCEPT " +
-                                "SELECT " +
-                                    "`product`.`name` AS `product` " +
-                                "FROM " +
-                                    "`оrder`, " +
-                                    "`product` " +
-                                "WHERE " +
-                                    "`оrder`.`product_id` = `product`.`id` AND " +
-                                    "strftime('%m', `оrder`.`dt`, 'unixepoch') = strftime('%m', date('now')) " +
-                                "GROUP BY " +
-                                    "`product` " +
-                                "ORDER BY " +
-                                    "`product`;";
-
-                            using (SQLiteDataReader reader = cmd.ExecuteReader())
-                            {
-                                while (reader.Read())
-                                    Console.WriteLine(reader["product"]);
-                            }
-
-                            Console.WriteLine();
-
-                            // ----
-
-                            Console.WriteLine("3. Сумма заказов и доля от общей суммы для продукта с максимальной суммой за каждый месяц.");
-
-                            cmd.CommandText =
-                                "SELECT " +
-                                    "`tableA`.`period` AS `period`, " +
-                                    "`tableA`.`product` AS `product`, " +
-                                    "`tableA`.`amount` AS `amount`, " +
-                                    "round(`amount` / `tableB`.`sum` * 100, 2) AS `percentage` " +
-                                "FROM " +
-                                    "(" +
-                                        "SELECT " +
-                                            "strftime('%m-%Y', `оrder`.`dt`, 'unixepoch') AS `period`, " +
-                                            "`product`.`name` AS `product`, " +
-                                            "max(`оrder`.`amount`) AS `amount` " +
-                                        "FROM " +
-                                            "`оrder`, " +
-                                            "`product` " +
-                                        "WHERE " +
-                                            "`оrder`.`product_id` = `product`.`id` " +
-                                        "GROUP BY " +
-                                            "`period`" +
-                                    ") AS `tableA` " +
-                                "INNER JOIN " +
-                                    "(" +
-                                        "SELECT " +
-                                            "strftime('%m-%Y', `dt`, 'unixepoch') AS `period`, " +
-                                            "total(`amount`) AS `sum` " +
-                                        "FROM " +
-                                            "`оrder` " +
-                                        "GROUP BY " +
-                                            "`period`" +
-                                    ") AS `tableB` " +
-                                "ON " +
-                                    "`tableA`.`period` = `tableB`.`period` " +
-                                "GROUP BY " +
-                                    "`tableA`.`period` " +
-                                "ORDER BY " +
-                                    "`tableA`.`period`;";
-
-                            Console.WriteLine("Период\tПродукт\tСумма заказов\tДоля");
-
-                            using (SQLiteDataReader reader = cmd.ExecuteReader())
-                            {
-                                while (reader.Read())
-                                    Console.WriteLine(string.Format("{0}\t{1}\t{2}\t{3}", reader["period"], reader["product"], reader["amount"], reader["percentage"]));
+                                foreach (var result in results)
+                                {
+                                    Console.WriteLine($"- {result.ErrorMessage}");
+                                }
                             }
                         }
+
+                        lineNumber++;
                     }
                 }
-            }
-            catch (SQLiteException e)
-            {
-                Console.WriteLine(e.Message);
+
+                await repository.AddOrdersAsync(orders);
+
+                //DisplayDataTable(await repository.GetOrdersAsync());
+
+                Console.WriteLine($"1. Количество и сумма заказов по каждому продукту за текущий месяц ({DateTime.Now.Month}).");
+
+                var query =
+                    "SELECT p.name AS Product, count(o.id) AS Number, total(o.amount) AS [Total amount] " +
+                    "FROM product p " +
+                    "JOIN [order] o ON o.product_id = p.id " +
+                    "WHERE strftime('%m', o.dt, 'unixepoch') = @cur_month " +
+                    "GROUP BY p.name " +
+                    "ORDER BY p.name";
+                var parameters = new Dictionary<string, object> { ["@cur_month"] = DateTime.Now.ToString("MM") };
+
+                DisplayDataTable(await repository.GetDataAsync(query, parameters));
+
+                Console.WriteLine($"2а. Продукты, которые были заказаны в текущем месяце ({DateTime.Now.Month}), но не в прошлом ({DateTime.Now.AddMonths(-1).Month}).");
+
+                query =
+                    "SELECT p.name AS Product " +
+                    "FROM product p " +
+                    "JOIN [order] o ON o.product_id = p.id " +
+                    "WHERE strftime('%m', o.dt, 'unixepoch') = @cur_month " +
+                    "GROUP BY p.name " +
+                    "EXCEPT " +
+                    "SELECT p.name AS Product " +
+                    "FROM product p " +
+                    "JOIN [order] o ON o.product_id = p.id " +
+                    "WHERE strftime('%m', o.dt, 'unixepoch') = @prev_month " +
+                    "GROUP BY p.name " +
+                    "ORDER BY p.name";
+                parameters.Add("@prev_month", DateTime.Now.AddMonths(-1).ToString("MM"));
+
+                DisplayDataTable(await repository.GetDataAsync(query, parameters));
+
+                Console.WriteLine($"2б. Продукты, которые были заказаны в прошлом месяце ({DateTime.Now.AddMonths(-1).Month}), но не в текущем ({DateTime.Now.Month}).");
+
+                query =
+                    "SELECT p.name AS Product " +
+                    "FROM product p " +
+                    "JOIN [order] o ON o.product_id = p.id " +
+                    "WHERE strftime('%m', o.dt, 'unixepoch') = @prev_month " +
+                    "GROUP BY p.name " +
+                    "EXCEPT " +
+                    "SELECT p.name AS Product " +
+                    "FROM product p " +
+                    "JOIN [order] o ON o.product_id = p.id " +
+                    "WHERE strftime('%m', o.dt, 'unixepoch') = @cur_month " +
+                    "GROUP BY p.name " +
+                    "ORDER BY p.name";
+
+                DisplayDataTable(await repository.GetDataAsync(query, parameters));
+
+                Console.WriteLine("3. Сумма заказов и доля от общей суммы для продукта с максимальной суммой за каждый месяц.");
+
+                query =
+                    "SELECT t1.period AS Period, t1.product AS Product, t1.amount AS Amount, round(t1.amount / t2.total_amount * 100, 2) AS Percentage " +
+                    "FROM (" +
+                        "SELECT strftime('%Y-%m', o.dt, 'unixepoch') AS period, p.name AS product, max(o.amount) AS amount " +
+                        "FROM product p " +
+                        "JOIN [order] o ON o.product_id = p.id " +
+                        "GROUP BY period" +
+                    ") t1 " +
+                    "JOIN (" +
+                        "SELECT strftime('%Y-%m', dt, 'unixepoch') AS period, total(amount) AS total_amount " +
+                        "FROM [order] " +
+                        "GROUP BY period" +
+                    ") t2 ON t1.period = t2.period " +
+                    "GROUP BY t1.period " +
+                    "ORDER BY t1.period";
+
+                DisplayDataTable(await repository.GetDataAsync(query));
             }
             catch (Exception e)
             {
                 Console.WriteLine(e.Message);
+            }
+
+            Console.ReadLine();
+        }
+
+        private static void DisplayDataTable(DataTable dataTable)
+        {
+            for (var i = 0; i < dataTable.Columns.Count; i++)
+            {
+                Console.Write($"{dataTable.Columns[i].ColumnName}\t");
+            }
+
+            Console.WriteLine();
+
+            for (var i = 0; i < dataTable.Rows.Count; i++)
+            {
+                for (var j = 0; j < dataTable.Columns.Count; j++)
+                {
+                    Console.Write($"{dataTable.Rows[i][j]}\t");
+                }
+
+                Console.WriteLine();
             }
         }
     }
