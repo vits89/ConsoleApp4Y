@@ -81,7 +81,7 @@ namespace ConsoleApp4Y
                             {
                                 orders.Add(order);
 
-                                if (orders.Count % LIST_CAPACITY == 0)
+                                if (orders.Count == LIST_CAPACITY)
                                 {
                                     await repository.AddOrdersAsync(orders);
 
@@ -135,6 +135,7 @@ namespace ConsoleApp4Y
                     "WHERE strftime('%m', o.dt, 'unixepoch') = @prev_month " +
                     "GROUP BY p.name " +
                     "ORDER BY p.name";
+
                 parameters.Add("@prev_month", DateTime.Now.AddMonths(-1).ToString("MM"));
 
                 DisplayDataTable(await repository.GetDataAsync(query, parameters));
