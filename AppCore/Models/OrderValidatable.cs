@@ -2,10 +2,11 @@
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 
-namespace ConsoleApp4Y.Models
+namespace ConsoleApp4Y.AppCore.Models
 {
-    public class Order : IValidatableObject
+    public class OrderValidatable : IValidatableObject
     {
+        public int? Id { get; set; }
         public DateTime? Dt { get; set; }
         public int? ProductId { get; set; }
         public float? Amount { get; set; }
@@ -13,6 +14,15 @@ namespace ConsoleApp4Y.Models
         public IEnumerable<ValidationResult> Validate(ValidationContext context)
         {
             var results = new List<ValidationResult>();
+
+            if (!Id.HasValue)
+            {
+                results.Add(new ValidationResult("Не задан идентификатор заказа"));
+            }
+            else if (Id.Value < 1)
+            {
+                results.Add(new ValidationResult("Неверное значение идентификатора заказа"));
+            }
 
             if (!Dt.HasValue)
             {
